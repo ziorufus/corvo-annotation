@@ -174,13 +174,26 @@ def geocode_id(id: int):
         raise HTTPException(status_code=500, detail=f"Geocoding failed: {str(e)}")
 
 @app.get("/location-list")
-def get_locations():
+def get_locations(only_with_info: bool = False, group: bool = False):
     """Return all locations as JSON."""
     db = SessionLocal()
-    locations = db.query(Location).order_by(Location.citations.desc()).all()
+    query = db.query(Location)
+    if only_with_info:
+        query = query.filter(Location.location_info.isnot(None), Location.location_info != "{}")
+    locations = query.order_by(Location.citations.desc()).all()
+
+    alternate_names: dict[int, list[str]] = {}
+    if group:
+        for loc in locations:
+            if loc.group is not None:
+                alternate_names.setdefault(loc.group, []).append(loc.name)
+        locations = [loc for loc in locations if loc.group is None]
+
     db.close()
-    return [
-        {
+
+    result = []
+    for loc in locations:
+        entry = {
             "id": loc.id,
             "name": loc.name,
             "type": loc.type,
@@ -189,8 +202,10 @@ def get_locations():
             "group": loc.group,
             "location_info": json.loads(loc.location_info) if loc.location_info else None,
         }
-        for loc in locations
-    ]
+        if group:
+            entry["alternate_names"] = alternate_names.get(loc.id, [])
+        result.append(entry)
+    return result
 
 
 @app.post("/load-data")
